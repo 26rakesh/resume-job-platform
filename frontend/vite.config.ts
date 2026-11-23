@@ -7,6 +7,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
   },
+  base: '/app/', // Assets served from /app/ in production
   server: {
     port: 3000,
     proxy: {

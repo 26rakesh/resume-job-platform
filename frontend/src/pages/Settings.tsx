@@ -1,5 +1,5 @@
 import { Layout } from '../components/Layout'
-import { Settings as SettingsIcon, Key, Database, Bell, Shield } from 'lucide-react'
+import { Key, Database, Bell, Shield } from 'lucide-react'
 
 export default function Settings() {
   return (

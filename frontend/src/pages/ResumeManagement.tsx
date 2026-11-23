@@ -1,5 +1,5 @@
 import { Layout } from '../components/Layout'
-import { FileText, Upload, Search, Download, Trash2 } from 'lucide-react'
+import { FileText, Upload, Search } from 'lucide-react'
 
 export default function ResumeManagement() {
   return (

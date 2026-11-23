@@ -7,8 +7,17 @@ use Illuminate\Http\Request;
 
 class UserController extends Controller
 {
+    /**
+     * Get current authenticated user
+     */
     public function show(Request $request)
     {
-        return response()->json(['user' => $request->user()]);
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        return response()->json(['user' => $user]);
     }
 }

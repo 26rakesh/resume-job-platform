@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../hooks/useAuth'
 import { Briefcase } from 'lucide-react'
 
 export default function Login() {
@@ -28,8 +28,13 @@ export default function Login() {
         await register(formData.name, formData.email, formData.password, formData.password_confirmation)
       }
       navigate('/')
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred')
+    } catch (err: unknown) {
+      if (err instanceof Error && 'response' in err) {
+        const axiosError = err as { response?: { data?: { message?: string } } }
+        setError(axiosError.response?.data?.message || 'An error occurred')
+      } else {
+        setError('An error occurred')
+      }
     } finally {
       setLoading(false)
     }

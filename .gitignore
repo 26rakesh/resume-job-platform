@@ -21,12 +21,17 @@ backend/public/hot
 backend/public/storage
 backend/public/build
 
+# React build output is committed to backend/public/app for Hostinger deployment
+# (server doesn't run Node.js, so we build locally and commit artifacts)
+!backend/public/app/
+
 # React
 frontend/node_modules/
 frontend/dist/
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local
+!frontend/.env.example
 
 # IDE
 .vscode/

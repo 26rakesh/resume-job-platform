@@ -4,7 +4,6 @@ import {
   FileText,
   Briefcase,
   TrendingUp,
-  Clock,
   CheckCircle,
   AlertCircle,
 } from 'lucide-react'

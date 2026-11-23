@@ -1,30 +1,32 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # Deny access to sensitive directories
-    RewriteRule ^app/ - [F,L]
-    RewriteRule ^bootstrap/ - [F,L]
-    RewriteRule ^config/ - [F,L]
-    RewriteRule ^database/ - [F,L]
-    RewriteRule ^routes/ - [F,L]
-    RewriteRule ^vendor/ - [F,L]
-    RewriteRule ^storage/ - [F,L]
+    # Deny access to sensitive directories (fallback deployment structure)
+    RewriteRule ^backend/app/ - [F,L]
+    RewriteRule ^backend/bootstrap/ - [F,L]
+    RewriteRule ^backend/config/ - [F,L]
+    RewriteRule ^backend/database/ - [F,L]
+    RewriteRule ^backend/routes/ - [F,L]
+    RewriteRule ^backend/vendor/ - [F,L]
+    RewriteRule ^backend/storage/ - [F,L]
+    RewriteRule ^frontend/ - [F,L]
+    RewriteRule ^scripts/ - [F,L]
+    RewriteRule ^docs/ - [F,L]
 
     # Deny access to sensitive files
-    RewriteRule ^.env$ - [F,L]
-    RewriteRule ^.env.*$ - [F,L]
-    RewriteRule ^artisan$ - [F,L]
-    RewriteRule ^composer.json$ - [F,L]
-    RewriteRule ^composer.lock$ - [F,L]
-    RewriteRule ^package.json$ - [F,L]
-    RewriteRule ^package-lock.json$ - [F,L]
-    RewriteRule ^phpunit.xml$ - [F,L]
-    RewriteRule ^README.md$ - [F,L]
+    RewriteRule ^backend/.env$ - [F,L]
+    RewriteRule ^backend/.env.*$ - [F,L]
+    RewriteRule ^backend/artisan$ - [F,L]
+    RewriteRule ^backend/composer.json$ - [F,L]
+    RewriteRule ^backend/composer.lock$ - [F,L]
+    RewriteRule ^frontend/package.json$ - [F,L]
+    RewriteRule ^frontend/package-lock.json$ - [F,L]
+    RewriteRule ^backend/phpunit.xml$ - [F,L]
 
-    # Allow Laravel's public routes
+    # Redirect to Laravel's public/index.php for all non-API routes
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule ^ index.php [L]
+    RewriteRule ^ backend/public/index.php [L]
 </IfModule>
 
 # Deny direct access to specific files by type

@@ -11,8 +11,16 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    /**
+     * Register a new user (development only - disabled in production)
+     * Production: Use artisan command: php artisan admin:create
+     */
     public function register(Request $request)
     {
+        if (config('app.env') === 'production') {
+            return response()->json(['message' => 'Registration is disabled in production'], 403);
+        }
+
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
@@ -23,17 +31,21 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'role' => 'admin',
+            'role' => 'user', // Default to 'user', never 'admin' via public registration
         ]);
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        // Cookie-based authentication - no token returned
+        Auth::login($user);
 
         return response()->json([
             'user' => $user,
-            'token' => $token,
+            'message' => 'Registration successful',
         ], 201);
     }
 
+    /**
+     * Login user with cookie-based authentication
+     */
     public function login(Request $request)
     {
         $request->validate([
@@ -41,25 +53,29 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (!Auth::attempt($request->only('email', 'password'), $request->boolean('remember'))) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        $request->session()->regenerate();
 
         return response()->json([
-            'user' => $user,
-            'token' => $token,
+            'user' => $request->user(),
+            'message' => 'Login successful',
         ]);
     }
 
+    /**
+     * Logout user - invalidate session
+     */
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        Auth::guard('web')->logout();
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
 
         return response()->json(['message' => 'Logged out successfully']);
     }

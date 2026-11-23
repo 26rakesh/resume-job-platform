@@ -1,5 +1,5 @@
 import { Layout } from '../components/Layout'
-import { Users, Plus, Search, Filter, MoreVertical } from 'lucide-react'
+import { Users, Plus, Search, Filter } from 'lucide-react'
 
 export default function Candidates() {
   return (

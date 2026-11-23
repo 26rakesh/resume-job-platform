@@ -18,6 +18,10 @@ return new class extends Migration
             $table->json('parsed_data')->nullable();
             $table->string('status')->default('pending');
             $table->timestamps();
+
+            // Indexes for filtering
+            $table->index('status');
+            $table->index('file_type');
         });
     }
 
