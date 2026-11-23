@@ -7,7 +7,7 @@ return [
     'connections' => [
         'database' => [
             'driver' => 'database',
-            'table' => env('QUEUE_TABLE', 'jobs'),
+            'table' => env('QUEUE_TABLE', 'queue_jobs'),
             'queue' => env('QUEUE_DEFAULT_QUEUE', 'default'),
             'retry_after' => 90,
             'after_commit' => false,

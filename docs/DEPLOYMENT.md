@@ -10,6 +10,31 @@ Source of truth: GitHub `main` branch of `26rakesh/resume-job-platform`.
 - **Do NOT assume** Hostinger Git runs `npm`/`vite build`.
 - PHP 8.3 on server; extensions per compatibility assessment.
 - Main Sunrise Paint website is at a separate `public_html` — jobs site is isolated.
+- Hostinger SSH access: **CONFIRMED**
+- MySQL database creation: **CONFIRMED**
+
+## CI/CD Pipeline
+
+GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on push/PR:
+
+**Backend Tests**:
+- PHP 8.3 setup
+- Composer dependency installation
+- Laravel migrations against disposable MySQL database
+- PHPUnit tests
+- Composer validation
+- PHP syntax checks
+
+**Frontend Tests**:
+- Node.js 20 setup
+- npm ci (clean install)
+- TypeScript check
+- ESLint
+- Production build
+- Build output verification
+- Artifact upload
+
+**No production credentials used** - CI uses disposable test database.
 
 ## Repository Structure
 
@@ -258,8 +283,10 @@ post-deploy (SSH):
 production-standard. For client domain deployments, recommend the standard
 pattern: deploy outside `public_html`, point document root to Laravel's `public/`.
 
-## Open items (waiting on user)
+## Open items
 
-1. SSH credentials (hPanel → Advanced → SSH Access) for post-deploy composer.
-2. MySQL DB name/user created in hPanel for `.env`.
-3. Confirm whether hPanel allows changing subdomain document root to implement preferred structure.
+1. ~~SSH credentials~~ **CONFIRMED** - Hostinger SSH access verified
+2. ~~MySQL DB name/user~~ **CONFIRMED** - MySQL database creation verified
+3. Confirm whether hPanel allows changing subdomain document root to implement preferred structure (or use fallback structure).
+4. Create `.env` file on server with production values after deployment.
+5. Run post-deploy commands via SSH (composer install, migrations, etc.).

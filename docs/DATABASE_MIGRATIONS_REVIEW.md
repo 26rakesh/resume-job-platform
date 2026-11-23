@@ -9,9 +9,23 @@ The original project scope required the following tables:
 
 ## Additional Migrations
 
-The implementation includes two additional migrations:
-4. **jobs** - Laravel queue jobs table
+The implementation includes additional migrations for queue and cache infrastructure:
+4. **queue_jobs** - Laravel queue jobs table (renamed from `jobs` to avoid conflict)
 5. **cache** - Laravel cache table
+
+## Recruitment Vacancy Table
+
+6. **job_listings** - Recruitment vacancy records (separate from queue infrastructure)
+
+## Table Naming Convention
+
+**Decision**: Use `job_listings` for recruitment vacancies to avoid conflict with Laravel's queue `jobs` table.
+
+- **Recruitment vacancies**: `job_listings` (clear, descriptive name)
+- **Background queue**: `queue_jobs` (renamed from standard `jobs` to avoid confusion)
+- **Laravel cache**: `cache` (standard Laravel table name)
+
+This naming convention prevents ambiguity and clearly separates business logic (recruitment) from infrastructure (queue/cache).
 
 ## Migration Review
 
@@ -110,10 +124,10 @@ Schema::create('resumes', function (Blueprint $table) {
 
 ---
 
-### 4. jobs (2024_01_01_000004_create_jobs_table.php)
+### 4. queue_jobs (2024_01_01_000004_create_queue_jobs_table.php)
 
 ```php
-Schema::create('jobs', function (Blueprint $table) {
+Schema::create('queue_jobs', function (Blueprint $table) {
     $table->id();
     $table->string('queue')->index();
     $table->longText('payload');
@@ -132,7 +146,7 @@ Schema::create('jobs', function (Blueprint $table) {
 - ⚠️ Custom timestamp columns (not using `timestamps()`)
 - ⚠️ No `updated_at` column (jobs are immutable once created)
 
-**Justification**: **REQUIRED** - This is the standard Laravel queue jobs table. The application uses `QUEUE_CONNECTION=database` for background job processing (e.g., AI job matching, resume parsing). Without this table, the queue system cannot function.
+**Justification**: **REQUIRED** - This is the Laravel queue jobs table (renamed from `jobs` to avoid conflict with `job_listings`). The application uses `QUEUE_CONNECTION=database` for background job processing (e.g., AI job matching, resume parsing). Without this table, the queue system cannot function.
 
 ---
 
@@ -163,16 +177,61 @@ Schema::create('cache_locks', function (Blueprint $table) {
 
 ---
 
+### 6. job_listings (2024_01_01_000006_create_job_listings_table.php)
+
+```php
+Schema::create('job_listings', function (Blueprint $table) {
+    $table->id();
+    $table->foreignId('user_id')->constrained()->onDelete('cascade');
+    $table->string('title');
+    $table->text('description')->nullable();
+    $table->string('company')->nullable();
+    $table->string('location')->nullable();
+    $table->string('job_type')->nullable();
+    $table->string('salary_range')->nullable();
+    $table->string('experience_level')->nullable();
+    $table->json('requirements')->nullable();
+    $table->json('skills')->nullable();
+    $table->string('application_url')->nullable();
+    $table->string('source')->nullable();
+    $table->string('status')->default('active');
+    $table->timestamp('posted_at')->nullable();
+    $table->timestamp('expires_at')->nullable();
+    $table->timestamps();
+
+    // Indexes for filtering
+    $table->index('status');
+    $table->index('job_type');
+    $table->index('location');
+    $table->index('posted_at');
+});
+```
+
+**Review**:
+- ✅ Primary key: `id()` (bigint, auto-increment)
+- ✅ Foreign key: `user_id` → `users.id` with `onDelete('cascade')`
+- ✅ Cascade delete: When a user is deleted, associated job listings are automatically deleted
+- ✅ JSON columns: `requirements`, `skills` (MySQL 5.7+ compatible)
+- ✅ Multiple indexes for filtering: `status`, `job_type`, `location`, `posted_at`
+- ✅ Comprehensive fields for recruitment vacancy data
+- ✅ Timestamps for audit trail
+- ✅ `posted_at` and `expires_at` for job lifecycle management
+
+**Justification**: **REQUIRED** - This table stores recruitment vacancy records, which are essential for the job discovery and matching features. Named `job_listings` to avoid conflict with the queue `jobs` table.
+
+---
+
 ## Migration Ordering
 
 The migrations are correctly ordered:
 1. `users` - Base table (no dependencies)
 2. `candidates` - Depends on `users` (foreign key)
 3. `resumes` - Depends on `candidates` (foreign key)
-4. `jobs` - Independent (Laravel queue table)
+4. `queue_jobs` - Independent (Laravel queue table)
 5. `cache` - Independent (Laravel cache table)
+6. `job_listings` - Depends on `users` (foreign key)
 
-✅ **Correct ordering** - Foreign key dependencies are satisfied.
+✅ **Correct ordering** - Foreign key dependencies are satisfied. `job_listings` depends on `users`, and since it uses migration number 000006, it runs after the `users` migration (000001), which is correct.
 
 ---
 
@@ -248,8 +307,19 @@ All JSON columns are compatible with MySQL 5.7+:
 3. ✅ **resumes** - Resume storage
 
 ### Additional Tables (Justified)
-4. ✅ **jobs** - Laravel queue system (required for background job processing)
+4. ✅ **queue_jobs** - Laravel queue system (required for background job processing, renamed from `jobs`)
 5. ✅ **cache** - Laravel cache system (required for caching)
+6. ✅ **job_listings** - Recruitment vacancy records (business logic table)
+
+### Table Naming Convention
+
+**Decision**: Use `job_listings` for recruitment vacancies to avoid conflict with Laravel's queue `jobs` table.
+
+- **Recruitment vacancies**: `job_listings` (clear, descriptive name)
+- **Background queue**: `queue_jobs` (renamed from standard `jobs` to avoid confusion)
+- **Laravel cache**: `cache` (standard Laravel table name)
+
+This naming convention prevents ambiguity and clearly separates business logic (recruitment) from infrastructure (queue/cache).
 
 ### Migration Status
 - ✅ All migrations follow Laravel conventions
@@ -257,21 +327,21 @@ All JSON columns are compatible with MySQL 5.7+:
 - ✅ Correct migration ordering
 - ✅ JSON columns compatible with MySQL
 - ✅ Appropriate column types
-- ⚠️ Optional: Add indexes on `resumes.status` and `resumes.file_type`
+- ✅ Indexes added on `resumes.status`, `resumes.file_type`, and `job_listings` filtering columns
 
 ### Recommendations
 
-1. **Add indexes** (optional, for performance):
-   ```php
-   $table->index('status'); // in resumes migration
-   $table->index('file_type'); // in resumes migration
-   ```
+1. **Indexes added** (performance):
+   - `resumes.status` and `resumes.file_type`
+   - `job_listings.status`, `job_listings.job_type`, `job_listings.location`, `job_listings.posted_at`
 
-2. **Do not remove** `jobs` or `cache` tables - they are required for Laravel's queue and cache systems.
+2. **Do not remove** `queue_jobs` or `cache` tables - they are required for Laravel's queue and cache systems.
 
 3. **Migration ordering is correct** - no changes needed.
 
 4. **JSON columns are safe** - MySQL 8.0+ (Hostinger) fully supports JSON.
+
+5. **Table naming is clear** - `job_listings` vs `queue_jobs` avoids confusion.
 
 ---
 
