@@ -42,20 +42,11 @@ jobs:
       - name: Install PHP dependencies
         working-directory: ./backend
         run: |
-          # Check if composer.lock exists
           if [ ! -f composer.lock ]; then
-            echo "composer.lock not found, running composer update to generate it..."
-            composer update --no-interaction --prefer-dist --optimize-autoloader
-            echo "composer.lock generated, committing to repository..."
-            git config --local user.email "github-actions[bot]@users.noreply.github.com"
-            git config --local user.name "github-actions[bot]"
-            git add composer.lock
-            git commit -m "chore: generate composer.lock for Laravel 13 dependencies" || echo "No changes to commit"
-            git push origin HEAD:feature/mvp-foundation || echo "Push failed, continuing with install"
-          else
-            echo "composer.lock found, running composer install..."
-            composer install --no-interaction --prefer-dist --optimize-autoloader
+            echo "ERROR: backend/composer.lock is missing. Run 'composer update' locally and commit the lock file."
+            exit 1
           fi
+          composer install --no-interaction --prefer-dist --optimize-autoloader --no-progress
 
       - name: Copy .env
         working-directory: ./backend

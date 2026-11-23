@@ -17,10 +17,11 @@ class AuthTest extends TestCase
             'password' => bcrypt('password123'),
         ]);
 
-        $response = $this->postJson('/api/login', [
-            'email' => 'test@example.com',
-            'password' => 'password123',
-        ]);
+        $response = $this->withHeader('referer', 'http://localhost')
+            ->postJson('/api/login', [
+                'email' => 'test@example.com',
+                'password' => 'password123',
+            ]);
 
         $response->assertStatus(200)
             ->assertJsonStructure(['user', 'message']);
@@ -92,6 +93,7 @@ class AuthTest extends TestCase
         $user = User::factory()->create();
 
         $this->actingAs($user)
+            ->withHeader('referer', 'http://localhost')
             ->postJson('/api/logout')
             ->assertStatus(200);
 
