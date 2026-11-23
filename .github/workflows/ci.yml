@@ -78,7 +78,7 @@ jobs:
 
       - name: Run Laravel tests
         working-directory: ./backend
-        run: php artisan test --verbose
+        run: php artisan test
 
       - name: Validate composer dependencies
         working-directory: ./backend
