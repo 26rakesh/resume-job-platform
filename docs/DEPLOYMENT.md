@@ -60,9 +60,9 @@ jobs-platform/
 
 **IMPORTANT**: The Laravel application root is `backend/`, not the repository root. All Composer commands must be run from the `backend/` directory.
 
-## Recommended Deployment Structure (Preferred)
+## Deployment Structure (REQUIRED)
 
-This is the standard Laravel deployment pattern. Requires changing the subdomain document root in hPanel.
+**MANDATORY**: The preferred deployment structure is the ONLY approved structure. The Laravel application root MUST be outside the public document root. The fallback structure relying solely on .htaccess protection is NOT APPROVED for production.
 
 ### Target layout on server
 
@@ -70,7 +70,7 @@ This is the standard Laravel deployment pattern. Requires changing the subdomain
 /home/<user>/
 ├── public_html/                  # Main Sunrise Paint site — NEVER touched
 └── jobs-platform/                # Hostinger Git deployment directory (repository root)
-    ├── backend/                  # Laravel application root
+    ├── backend/                  # Laravel application root (OUTSIDE public document root)
     │   ├── app/ bootstrap/ config/ database/ routes/   # NOT web-accessible
     │   ├── vendor/               # NOT web-accessible
     │   ├── storage/              # NOT web-accessible
@@ -85,10 +85,17 @@ This is the standard Laravel deployment pattern. Requires changing the subdomain
     └── docs/                     # Documentation
 ```
 
-### hPanel Configuration Required
+### hPanel Configuration Required (MANDATORY)
 
 1. **Git Deployment Directory**: Set to `jobs-platform` (or full path `/home/<user>/jobs-platform`)
 2. **Subdomain Document Root**: Set to `jobs-platform/backend/public` (or full path `/home/<user>/jobs-platform/backend/public`)
+
+**CRITICAL**: The subdomain document root MUST point to `backend/public`, NOT to the repository root or `public_html`. This ensures that:
+- `.env` file is outside public access
+- `vendor/` directory is outside public access
+- `storage/` directory is outside public access
+- `app/`, `bootstrap/`, `config/`, `database/`, `routes/` are outside public access
+- Only Laravel's `public/` directory is web-accessible
 
 ### Exact Paths
 
@@ -101,6 +108,7 @@ This is the standard Laravel deployment pattern. Requires changing the subdomain
 || React build output | `/home/<user>/jobs-platform/backend/public/app` |
 || Private resume storage | `/home/<user>/jobs-platform/backend/storage/app/private` |
 || .env file | `/home/<user>/jobs-platform/backend/.env` |
+|| Subdomain document root | `/home/<user>/jobs-platform/backend/public` |
 
 ### Composer Commands
 
@@ -119,65 +127,6 @@ chmod -R 775 storage bootstrap/cache
 ```cron
 */15 * * * * cd /home/<user>/jobs-platform/backend && php artisan schedule:run >> /dev/null 2>&1
 ```
-
----
-
-## Alternative Deployment Structure (Fallback)
-
-If hPanel does not allow changing the subdomain document root, use this fallback with `.htaccess` protection. This structure preserves the repository layout but places everything under the public document root.
-
-### Target layout on server
-
-```
-/home/<user>/domains/jobs.sunrisepaint.in/
-└── public_html/                  # Hostinger Git deployment directory & web root (repository root)
-    ├── .htaccess                 # 🔒 denies access to backend/, frontend/, vendor/, .env, storage/
-    ├── backend/                  # Laravel application root
-    │   ├── app/ bootstrap/ config/ database/ routes/   # protected by .htaccess
-    │   ├── vendor/               # protected by .htaccess
-    │   ├── storage/              # protected by .htaccess
-    │   ├── .env                  # protected by .htaccess
-    │   ├── artisan               # protected by .htaccess
-    │   └── public/               # Web root for Laravel
-    │       ├── index.php         # Laravel entrypoint
-    │       ├── .htaccess         # Laravel routing
-    │       └── app/              # React build output (vite build)
-    ├── frontend/                 # React source (protected by .htaccess)
-    ├── scripts/                  # Build scripts (protected by .htaccess)
-    └── docs/                     # Documentation (protected by .htaccess)
-```
-
-### Exact Paths
-
-|| Item | Path |
-||------|------|
-|| Git deployment directory | `/home/<user>/domains/jobs.sunrisepaint.in/public_html` |
-|| Repository root | `/home/<user>/domains/jobs.sunrisepaint.in/public_html` |
-|| Laravel application root | `/home/<user>/domains/jobs.sunrisepaint.in/public_html/backend` |
-|| Laravel public directory | `/home/<user>/domains/jobs.sunrisepaint.in/public_html/backend/public` |
-|| React build output | `/home/<user>/domains/jobs.sunrisepaint.in/public_html/backend/public/app` |
-|| Private resume storage | `/home/<user>/domains/jobs.sunrisepaint.in/public_html/backend/storage/app/private` |
-|| .env file | `/home/<user>/domains/jobs.sunrisepaint.in/public_html/backend/.env` |
-
-### Composer Commands
-
-All Composer commands run from Laravel application root (`backend/`):
-
-```bash
-cd /home/<user>/domains/jobs.sunrisepaint.in/public_html/backend
-composer install --no-dev --optimize-autoloader
-php artisan migrate --force
-php artisan config:cache route:cache view:cache
-chmod -R 775 storage bootstrap/cache
-```
-
-### Cron Job
-
-```cron
-*/15 * * * * cd /home/<user>/domains/jobs.sunrisepaint.in/public_html/backend && php artisan schedule:run >> /dev/null 2>&1
-```
-
-**Security mitigation**: Root `.htaccess` denies web access to sensitive directories (`backend/`, `frontend/`, `vendor/`, etc.). This is a partial mitigation — for client deployments, recommend the preferred structure.
 
 ## Reproducible build process
 
