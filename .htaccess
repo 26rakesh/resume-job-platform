@@ -1,39 +1,23 @@
-<IfModule mod_rewrite.c>
-    RewriteEngine On
+# Deny ALL browser access to the Git deployment directory.
+# This directory (public_html/jobs-platform) contains full source code,
+# .git, backend config and must never be web-accessible.
+# The live site is served from public_html/ itself (index.php + app/).
 
-    # Deny access to sensitive directories (fallback deployment structure)
-    RewriteRule ^backend/app/ - [F,L]
-    RewriteRule ^backend/bootstrap/ - [F,L]
-    RewriteRule ^backend/config/ - [F,L]
-    RewriteRule ^backend/database/ - [F,L]
-    RewriteRule ^backend/routes/ - [F,L]
-    RewriteRule ^backend/vendor/ - [F,L]
-    RewriteRule ^backend/storage/ - [F,L]
-    RewriteRule ^frontend/ - [F,L]
-    RewriteRule ^scripts/ - [F,L]
-    RewriteRule ^docs/ - [F,L]
-
-    # Deny access to sensitive files
-    RewriteRule ^backend/.env$ - [F,L]
-    RewriteRule ^backend/.env.*$ - [F,L]
-    RewriteRule ^backend/artisan$ - [F,L]
-    RewriteRule ^backend/composer.json$ - [F,L]
-    RewriteRule ^backend/composer.lock$ - [F,L]
-    RewriteRule ^frontend/package.json$ - [F,L]
-    RewriteRule ^frontend/package-lock.json$ - [F,L]
-    RewriteRule ^backend/phpunit.xml$ - [F,L]
-
-    # Redirect to Laravel's public/index.php for all non-API routes
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule ^ backend/public/index.php [L]
+<IfModule mod_authz_core.c>
+    Require all denied
 </IfModule>
-
-# Deny direct access to specific files by type
-<FilesMatch "^\.env|artisan|composer\.(json|lock)|package(-lock)?\.json|phpunit\.xml">
+<IfModule !mod_authz_core.c>
     Order allow,deny
     Deny from all
-</FilesMatch>
+</IfModule>
 
-# Deny directory listing
-Options -Indexes
+# Belt-and-suspenders: explicitly block sensitive paths if the above is ignored
+<FilesMatch "(^\.|\.env|\.git|composer\.(json|lock)|artisan|\.htaccess)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
