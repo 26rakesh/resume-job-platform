@@ -7,10 +7,12 @@
 #  - single-instance lock (shared with jobs-rollback.sh), commit verification, append-only log
 #  - never touches .env, APP_KEY, storage/app/private, resumes, logs, DB
 #  - never runs migrations, never runs composer update
-#  - React assets staged to temp dir first, replaced atomically in BOTH locations
+#  - NEVER chmod -R on storage (private resumes keep their permissions)
+#  - bootstrap/cache preserved: only bootstrap/app.php + providers.php synced
+#  - snapshot fully validated BEFORE runtime is modified
+#  - React assets staged to temp, verified, swapped atomically in BOTH locations
 #  - view:cache skipped when resources/views is absent
-#  - bootstrap/cache preserved (only framework dirs synced, .gitignore kept)
-#  - any failure after sync start -> full rollback to snapshot, non-zero exit
+#  - any failure after sync start -> full rollback; non-zero exit
 set -u
 
 PHP=/opt/alt/php83/usr/bin/php
@@ -18,12 +20,14 @@ COMPOSER=/home/u444986405/bin/composer
 SRC=/home/u444986405/domains/jobs.sunrisepaint.in/public_html/jobs-platform
 DST=/home/u444986405/jobs-platform/backend
 LIVE_APP=/home/u444986405/domains/jobs.sunrisepaint.in/public_html/app
-LIVE_TMP=/home/u444986405/domains/jobs.sunrisepaint.in/public_html/.app.tmp.$$ 
+LIVE_TMP=/home/u444986405/domains/jobs.sunrisepaint.in/public_html/.app.tmp.$$
 STATE=/home/u444986405/jobs-platform/.deployed-sha
 LOCK=/tmp/jobs-sync.lock
 LOG=/home/u444986405/jobs-platform/storage/logs/deploy-sync.log
 SNAP=/home/u444986405/jobs-platform/.snapshots
-SYNC_DIRS="app bootstrap config database routes tests public artisan composer.json composer.lock phpunit.xml"
+SYNC_DIRS="app config database routes tests public"
+BOOT_FILES="app.php providers.php"
+TOP_FILES="artisan composer.json composer.lock phpunit.xml"
 
 log(){ echo "$(date -u +%FT%TZ) $*" >> "$LOG"; }
 die(){ log "FAIL: $*"; exit 1; }
@@ -35,12 +39,14 @@ flock -n 9 || exit 0
 [ -x "$COMPOSER" ] || die "composer missing"
 [ -d "$SRC/backend" ] || die "source backend missing"
 [ -d "$DST" ] || die "runtime backend missing"
-for d in app bootstrap config database routes public; do
+for d in app config database routes public bootstrap; do
   [ -d "$SRC/backend/$d" ] || die "source dir missing: backend/$d"
 done
-[ -f "$SRC/backend/artisan" ] || die "artisan missing"
-[ -f "$SRC/backend/composer.json" ] || die "composer.json missing"
-[ -f "$SRC/backend/composer.lock" ] || die "composer.lock missing"
+for f in artisan composer.json composer.lock phpunit.xml; do
+  [ -f "$SRC/backend/$f" ] || die "source file missing: backend/$f"
+done
+[ -f "$SRC/backend/public/index.php" ] || die "public/index.php missing"
+[ -f "$SRC/backend/public/.htaccess" ] || die "public/.htaccess missing"
 [ -d "$SRC/backend/public/app" ] || die "React build missing: public/app"
 [ -f "$SRC/backend/public/app/index.html" ] || die "React index.html missing"
 
@@ -51,31 +57,63 @@ OLD_SHA=$(cat "$STATE" 2>/dev/null || echo "none")
 mkdir -p "$(dirname "$LOG")" "$SNAP"
 log "SYNC start $OLD_SHA -> $NEW_SHA"
 
-# ---- snapshot (code dirs only — NEVER .env/storage/vendor/private data) ----
+# ---- snapshot (code only — NEVER .env/storage/vendor/private data) ----
 SNAPDIR="$SNAP/$NEW_SHA.prev"
 rm -rf "$SNAPDIR"; mkdir -p "$SNAPDIR"
+cp_ok=1
 for d in $SYNC_DIRS; do
-  [ -e "$DST/$d" ] && cp -a "$DST/$d" "$SNAPDIR/" 2>/dev/null
+  [ -e "$DST/$d" ] && cp -a "$DST/$d" "$SNAPDIR/" || true
 done
-[ -d "$DST/bootstrap/cache" ] && cp -a "$DST/bootstrap/cache/.gitignore" "$SNAPDIR/bootstrap-cache-gitignore" 2>/dev/null
+for f in $BOOT_FILES; do
+  [ -f "$DST/bootstrap/$f" ] && { mkdir -p "$SNAPDIR/bootstrap"; cp -a "$DST/bootstrap/$f" "$SNAPDIR/bootstrap/"; }
+done
+for f in $TOP_FILES; do
+  [ -f "$DST/$f" ] && cp -a "$DST/$f" "$SNAPDIR/"
+done
+[ -d "$DST/public/app" ] && cp -a "$DST/public/app" "$SNAPDIR/public-app-tmp" && mv "$SNAPDIR/public-app-tmp" "$SNAPDIR/public-app"
+# validate snapshot BEFORE touching runtime
+for d in app config database routes public; do
+  [ -d "$SNAPDIR/$d" ] || { log "FAIL: snapshot incomplete (missing $d) — aborting before changes"; rm -rf "$SNAPDIR"; exit 1; }
+done
+[ -f "$SNAPDIR/composer.json" ] && [ -f "$SNAPDIR/composer.lock" ] || { log "FAIL: snapshot missing composer files — aborting"; rm -rf "$SNAPDIR"; exit 1; }
+[ -d "$SNAPDIR/public-app" ] && [ -f "$SNAPDIR/public-app/index.html" ] || { log "FAIL: snapshot React build missing index.html — aborting"; rm -rf "$SNAPDIR"; exit 1; }
 
 rollback(){
-  log "ROLLBACK to snapshot $OLD_SHA"
-  for d in $SYNC_DIRS; do rm -rf "$DST/$d"; done
+  log "ROLLBACK start to snapshot $OLD_SHA"
+  local ok=1
   for d in $SYNC_DIRS; do
-    [ -e "$SNAPDIR/$d" ] && cp -a "$SNAPDIR/$d" "$DST/$d"
+    [ -e "$SNAPDIR/$d" ] || continue
+    rm -rf "$DST/$d" && cp -a "$SNAPDIR/$d" "$DST/$d" || { log "ROLLBACK FAIL: restore $d"; ok=0; }
   done
-  # restore React assets to temp then swap (never delete live first)
-  rm -rf "$DST/public/app.tmp" "$LIVE_TMP"
-  [ -d "$SNAPDIR/public/app" ] && cp -a "$SNAPDIR/public/app" "$DST/public/app.tmp"
-  [ -d "$DST/public/app.tmp" ] && { rm -rf "$DST/public/app"; mv "$DST/public/app.tmp" "$DST/public/app"; }
-  [ -d "$SNAPDIR/public/app" ] && cp -a "$SNAPDIR/public/app" "$LIVE_TMP" && { rm -rf "$LIVE_APP"; mv "$LIVE_TMP" "$LIVE_APP"; }
-  (cd "$DST" && "$PHP" "$COMPOSER" install --no-dev --prefer-dist --optimize-autoloader --no-interaction) >> "$LOG" 2>&1
-  (cd "$DST" && "$PHP" artisan config:cache route:cache) >> "$LOG" 2>&1
-  rm -rf "$LIVE_TMP" "$DST/public/app.tmp"
-  log "ROLLBACK done"
+  for f in $BOOT_FILES; do
+    [ -f "$SNAPDIR/bootstrap/$f" ] && cp -a "$SNAPDIR/bootstrap/$f" "$DST/bootstrap/$f" || true
+  done
+  for f in $TOP_FILES; do
+    [ -f "$SNAPDIR/$f" ] && cp -a "$SNAPDIR/$f" "$DST/$f" || { log "ROLLBACK FAIL: restore $f"; ok=0; }
+  done
+  # React: stage then swap, never delete live first
+  rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
+  if [ -d "$SNAPDIR/public-app" ]; then
+    cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" && [ -f "$DST/public/app.rbtmp/index.html" ] \
+      && { rm -rf "$DST/public/app"; mv "$DST/public/app.rbtmp" "$DST/public/app"; } \
+      || { log "ROLLBACK FAIL: stage runtime app"; ok=0; }
+    cp -a "$SNAPDIR/public-app" "$LIVE_TMP" && [ -f "$LIVE_TMP/index.html" ] \
+      && { rm -rf "$LIVE_APP"; mv "$LIVE_TMP" "$LIVE_APP"; } \
+      || { log "ROLLBACK FAIL: stage live app"; ok=0; }
+  fi
+  (cd "$DST" && "$PHP" "$COMPOSER" install --no-dev --prefer-dist --optimize-autoloader --no-interaction) >> "$LOG" 2>&1 \
+    || { log "ROLLBACK FAIL: composer install"; ok=0; }
+  CACHE_CMD="config:cache route:cache"
+  [ -d "$DST/resources/views" ] && CACHE_CMD="$CACHE_CMD view:cache"
+  (cd "$DST" && "$PHP" artisan $CACHE_CMD) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: cache rebuild"; ok=0; }
+  (cd "$DST" && "$PHP" artisan --version) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: artisan boot"; ok=0; }
+  UP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 https://jobs.sunrisepaint.in/up)
+  [ "$UP" = "200" ] || { log "ROLLBACK FAIL: live /up=$UP"; ok=0; }
+  rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp"
+  if [ "$ok" = "1" ]; then log "ROLLBACK done $OLD_SHA (live /up=200)"; else log "ROLLBACK FAILED $OLD_SHA"; fi
+  [ "$ok" = "1" ]
 }
-fail(){ log "FAIL: $* — rolling back"; rollback; exit 1; }
+fail(){ log "FAIL: $* — rolling back"; rollback || true; exit 1; }
 
 # ---- stage React assets to temp, verify, then swap both locations ----
 rm -rf "$DST/public/app.new" "$LIVE_TMP"
@@ -86,28 +124,31 @@ cp -a "$DST/public/app.new" "$LIVE_TMP" || fail "stage live app"
 rm -rf "$DST/public/app"; mv "$DST/public/app.new" "$DST/public/app" || fail "swap runtime app"
 rm -rf "$LIVE_APP"; mv "$LIVE_TMP" "$LIVE_APP" || fail "swap live app"
 
-# ---- sync code dirs ----
-for d in app bootstrap config database routes tests; do
+# ---- sync code dirs (never bootstrap/cache, never storage) ----
+for d in app config database routes tests; do
   rm -rf "$DST/$d"
   cp -a "$SRC/backend/$d" "$DST/$d" || fail "sync $d"
 done
-for f in artisan composer.json composer.lock phpunit.xml; do
+# bootstrap: only app.php + providers.php — cache dir preserved
+for f in $BOOT_FILES; do
+  cp -a "$SRC/backend/bootstrap/$f" "$DST/bootstrap/$f" || fail "sync bootstrap/$f"
+done
+for f in $TOP_FILES; do
   cp -a "$SRC/backend/$f" "$DST/$f" || fail "sync $f"
 done
-# public dir: keep runtime public/.htaccess & index.php, sync only app/ (already done)
+# public: entry files preserved from runtime if present, app already swapped
 [ -f "$DST/public/index.php" ] || cp -a "$SRC/backend/public/index.php" "$DST/public/index.php"
 [ -f "$DST/public/.htaccess" ] || cp -a "$SRC/backend/public/.htaccess" "$DST/public/.htaccess"
-# bootstrap/cache: ensure dir exists, keep server .gitignore, do not wipe
-mkdir -p "$DST/bootstrap/cache"
-[ -f "$SNAPDIR/bootstrap-cache-gitignore" ] && cp -a "$SNAPDIR/bootstrap-cache-gitignore" "$DST/bootstrap/cache/.gitignore" 2>/dev/null || true
+
+# ---- writable dirs: ONLY framework cache/session/view + logs — never storage/app ----
+chmod 775 "$DST/storage/framework/cache" "$DST/storage/framework/sessions" "$DST/storage/framework/views" "$DST/storage/logs" 2>/dev/null || true
+mkdir -p "$DST/bootstrap/cache" "$DST/storage/framework/cache" "$DST/storage/framework/sessions" "$DST/storage/framework/views" "$DST/storage/logs" 2>/dev/null
 
 # ---- composer only when lock changed ----
 if ! cmp -s "$SRC/backend/composer.lock" "$SNAPDIR/composer.lock" 2>/dev/null; then
   (cd "$DST" && "$PHP" "$COMPOSER" install --no-dev --prefer-dist --optimize-autoloader --no-interaction) >> "$LOG" 2>&1 \
     || fail "composer install"
 fi
-
-chmod -R 775 "$DST/storage" "$DST/bootstrap/cache" 2>/dev/null
 
 # ---- caches: view:cache only if resources/views exists ----
 CACHE_CMD="config:cache route:cache"
