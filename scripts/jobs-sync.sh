@@ -33,19 +33,44 @@ TOP_FILES="artisan composer.json composer.lock phpunit.xml"
 log(){ echo "$(date -u +%FT%TZ) $*" >> "$LOG"; }
 die(){ log "FAIL: $*"; exit 1; }
 
-# Guarded rename-swap: $1=target dir, $2=staged dir (must contain index.html).
+# Guarded transactional rename-swap: $1=target dir, $2=staged dir.
 # - aborts if a stale .old exists (manual inspection required)
-# - checks every mv; keeps .old unless replacement verified; deletes .old only on success
+# - checks every mv; on staged-move or verify failure, attempts to restore .old
+#   back to target immediately; preserves .old and logs its path if recovery fails
+# - deletes .old only after replacement verified in place
 swap_dir(){
-  local tgt="$1" staged="$2"
+  local tgt="$1" staged="$2" had_old=0
   if [ -e "$tgt.old" ]; then log "FAIL: stale $tgt.old exists — manual inspection required at $tgt.old"; return 1; fi
   if [ -d "$tgt" ]; then
     mv "$tgt" "$tgt.old" || { log "FAIL: mv $tgt -> $tgt.old failed"; return 1; }
     [ -d "$tgt.old" ] || { log "FAIL: $tgt.old missing after mv"; return 1; }
+    had_old=1
   fi
-  mv "$staged" "$tgt" || { log "FAIL: mv $staged -> $tgt failed"; return 1; }
-  [ -f "$tgt/index.html" ] || { log "FAIL: $tgt/index.html missing after swap"; return 1; }
-  rm -rf "$tgt.old"
+  if ! mv "$staged" "$tgt"; then
+    log "FAIL: mv $staged -> $tgt failed"
+    if [ "$had_old" = "1" ]; then
+      if mv "$tgt.old" "$tgt" 2>/dev/null && [ -d "$tgt" ]; then
+        log "recovered $tgt from .old after failed staged move"
+      else
+        log "RECOVERY FAIL: $tgt.old preserved at $tgt.old — manual restore required"
+      fi
+    fi
+    return 1
+  fi
+  if [ ! -f "$tgt/index.html" ]; then
+    log "FAIL: $tgt/index.html missing after swap"
+    if [ "$had_old" = "1" ]; then
+      local bad="$tgt.bad.$$"
+      mv "$tgt" "$bad" 2>/dev/null
+      if mv "$tgt.old" "$tgt" 2>/dev/null && [ -d "$tgt" ]; then
+        rm -rf "$bad"; log "recovered $tgt from .old after bad staged dir"
+      else
+        log "RECOVERY FAIL: backups preserved at $tgt.old and $bad — manual restore required"
+      fi
+    fi
+    return 1
+  fi
+  [ "$had_old" = "1" ] && rm -rf "$tgt.old"
   return 0
 }
 
