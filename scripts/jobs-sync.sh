@@ -59,18 +59,21 @@ log "SYNC start $OLD_SHA -> $NEW_SHA"
 
 # ---- snapshot (code only — NEVER .env/storage/vendor/private data) ----
 SNAPDIR="$SNAP/$NEW_SHA.prev"
-rm -rf "$SNAPDIR"; mkdir -p "$SNAPDIR"
-cp_ok=1
+rm -rf "$SNAPDIR"; mkdir -p "$SNAPDIR" || die "cannot create snapshot dir"
+snap_fail=0
 for d in $SYNC_DIRS; do
-  [ -e "$DST/$d" ] && cp -a "$DST/$d" "$SNAPDIR/" || true
+  if [ -e "$DST/$d" ]; then cp -a "$DST/$d" "$SNAPDIR/" || snap_fail=1; fi
 done
 for f in $BOOT_FILES; do
-  [ -f "$DST/bootstrap/$f" ] && { mkdir -p "$SNAPDIR/bootstrap"; cp -a "$DST/bootstrap/$f" "$SNAPDIR/bootstrap/"; }
+  if [ -f "$DST/bootstrap/$f" ]; then mkdir -p "$SNAPDIR/bootstrap" && cp -a "$DST/bootstrap/$f" "$SNAPDIR/bootstrap/" || snap_fail=1; fi
 done
 for f in $TOP_FILES; do
-  [ -f "$DST/$f" ] && cp -a "$DST/$f" "$SNAPDIR/"
+  [ -f "$DST/$f" ] && { cp -a "$DST/$f" "$SNAPDIR/" || snap_fail=1; }
 done
-[ -d "$DST/public/app" ] && cp -a "$DST/public/app" "$SNAPDIR/public-app-tmp" && mv "$SNAPDIR/public-app-tmp" "$SNAPDIR/public-app"
+if [ -d "$DST/public/app" ]; then
+  mkdir -p "$SNAPDIR" && cp -a "$DST/public/app" "$SNAPDIR/public-app" || snap_fail=1
+fi
+[ "$snap_fail" = "0" ] || { log "FAIL: snapshot copy failed — aborting before changes"; rm -rf "$SNAPDIR"; exit 1; }
 # validate snapshot BEFORE touching runtime
 for d in app config database routes public; do
   [ -d "$SNAPDIR/$d" ] || { log "FAIL: snapshot incomplete (missing $d) — aborting before changes"; rm -rf "$SNAPDIR"; exit 1; }
@@ -82,14 +85,18 @@ rollback(){
   log "ROLLBACK start to snapshot $OLD_SHA"
   local ok=1
   for d in $SYNC_DIRS; do
-    [ -e "$SNAPDIR/$d" ] || continue
-    rm -rf "$DST/$d" && cp -a "$SNAPDIR/$d" "$DST/$d" || { log "ROLLBACK FAIL: restore $d"; ok=0; }
+    rm -rf "$DST/$d"
+    if [ -e "$SNAPDIR/$d" ]; then cp -a "$SNAPDIR/$d" "$DST/$d" && [ -e "$DST/$d" ] || { log "ROLLBACK FAIL: restore $d"; ok=0; }
+    fi
   done
   for f in $BOOT_FILES; do
-    [ -f "$SNAPDIR/bootstrap/$f" ] && cp -a "$SNAPDIR/bootstrap/$f" "$DST/bootstrap/$f" || true
+    if [ -f "$SNAPDIR/bootstrap/$f" ]; then
+      cp -a "$SNAPDIR/bootstrap/$f" "$DST/bootstrap/$f" && [ -f "$DST/bootstrap/$f" ] || { log "ROLLBACK FAIL: restore bootstrap/$f"; ok=0; }
+    fi
   done
   for f in $TOP_FILES; do
-    [ -f "$SNAPDIR/$f" ] && cp -a "$SNAPDIR/$f" "$DST/$f" || { log "ROLLBACK FAIL: restore $f"; ok=0; }
+    if [ -f "$SNAPDIR/$f" ]; then cp -a "$SNAPDIR/$f" "$DST/$f" && [ -f "$DST/$f" ] || { log "ROLLBACK FAIL: restore $f"; ok=0; }
+    fi
   done
   # React: stage then swap, never delete live first
   rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
@@ -141,8 +148,8 @@ done
 [ -f "$DST/public/.htaccess" ] || cp -a "$SRC/backend/public/.htaccess" "$DST/public/.htaccess"
 
 # ---- writable dirs: ONLY framework cache/session/view + logs — never storage/app ----
-chmod 775 "$DST/storage/framework/cache" "$DST/storage/framework/sessions" "$DST/storage/framework/views" "$DST/storage/logs" 2>/dev/null || true
 mkdir -p "$DST/bootstrap/cache" "$DST/storage/framework/cache" "$DST/storage/framework/sessions" "$DST/storage/framework/views" "$DST/storage/logs" 2>/dev/null
+chmod 775 "$DST/storage/framework/cache" "$DST/storage/framework/sessions" "$DST/storage/framework/views" "$DST/storage/logs" 2>/dev/null || true
 
 # ---- composer only when lock changed ----
 if ! cmp -s "$SRC/backend/composer.lock" "$SNAPDIR/composer.lock" 2>/dev/null; then

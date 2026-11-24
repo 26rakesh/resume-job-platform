@@ -38,7 +38,11 @@ for d in app config database routes tests public; do
   [ -e "$SNAPDIR/$d" ] && cp -a "$SNAPDIR/$d" "$DST/$d" || { log "ROLLBACK FAIL: restore $d"; ok=0; }
 done
 for f in app.php providers.php; do
-  [ -f "$SNAPDIR/bootstrap/$f" ] && cp -a "$SNAPDIR/bootstrap/$f" "$DST/bootstrap/$f"
+  if [ -f "$SNAPDIR/bootstrap/$f" ]; then
+    cp -a "$SNAPDIR/bootstrap/$f" "$DST/bootstrap/$f" && [ -f "$DST/bootstrap/$f" ] || { log "ROLLBACK FAIL: restore bootstrap/$f"; ok=0; }
+  else
+    log "ROLLBACK FAIL: snapshot missing bootstrap/$f"; ok=0
+  fi
 done
 for f in artisan composer.json composer.lock phpunit.xml; do
   [ -f "$SNAPDIR/$f" ] && cp -a "$SNAPDIR/$f" "$DST/$f" || { log "ROLLBACK FAIL: restore $f"; ok=0; }
