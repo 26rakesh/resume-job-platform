@@ -39,11 +39,14 @@ flock -n 9 || exit 0
 [ -x "$COMPOSER" ] || die "composer missing"
 [ -d "$SRC/backend" ] || die "source backend missing"
 [ -d "$DST" ] || die "runtime backend missing"
-for d in app config database routes public bootstrap; do
+for d in app config database routes tests public bootstrap; do
   [ -d "$SRC/backend/$d" ] || die "source dir missing: backend/$d"
 done
-for f in artisan composer.json composer.lock phpunit.xml; do
+for f in $TOP_FILES; do
   [ -f "$SRC/backend/$f" ] || die "source file missing: backend/$f"
+done
+for f in $BOOT_FILES; do
+  [ -f "$SRC/backend/bootstrap/$f" ] || die "source file missing: backend/bootstrap/$f"
 done
 [ -f "$SRC/backend/public/index.php" ] || die "public/index.php missing"
 [ -f "$SRC/backend/public/.htaccess" ] || die "public/.htaccess missing"
@@ -75,10 +78,15 @@ if [ -d "$DST/public/app" ]; then
 fi
 [ "$snap_fail" = "0" ] || { log "FAIL: snapshot copy failed — aborting before changes"; rm -rf "$SNAPDIR"; exit 1; }
 # validate snapshot BEFORE touching runtime
-for d in app config database routes public; do
+for d in $SYNC_DIRS; do
   [ -d "$SNAPDIR/$d" ] || { log "FAIL: snapshot incomplete (missing $d) — aborting before changes"; rm -rf "$SNAPDIR"; exit 1; }
 done
-[ -f "$SNAPDIR/composer.json" ] && [ -f "$SNAPDIR/composer.lock" ] || { log "FAIL: snapshot missing composer files — aborting"; rm -rf "$SNAPDIR"; exit 1; }
+for f in $BOOT_FILES; do
+  [ -f "$SNAPDIR/bootstrap/$f" ] || { log "FAIL: snapshot missing bootstrap/$f — aborting"; rm -rf "$SNAPDIR"; exit 1; }
+done
+for f in $TOP_FILES; do
+  [ -f "$SNAPDIR/$f" ] || { log "FAIL: snapshot missing $f — aborting"; rm -rf "$SNAPDIR"; exit 1; }
+done
 [ -d "$SNAPDIR/public-app" ] && [ -f "$SNAPDIR/public-app/index.html" ] || { log "FAIL: snapshot React build missing index.html — aborting"; rm -rf "$SNAPDIR"; exit 1; }
 
 rollback(){
@@ -86,16 +94,24 @@ rollback(){
   local ok=1
   for d in $SYNC_DIRS; do
     rm -rf "$DST/$d"
-    if [ -e "$SNAPDIR/$d" ]; then cp -a "$SNAPDIR/$d" "$DST/$d" && [ -e "$DST/$d" ] || { log "ROLLBACK FAIL: restore $d"; ok=0; }
+    if [ -e "$SNAPDIR/$d" ]; then
+      cp -a "$SNAPDIR/$d" "$DST/$d" && [ -e "$DST/$d" ] || { log "ROLLBACK FAIL: restore $d"; ok=0; }
+    else
+      log "ROLLBACK FAIL: snapshot missing $d"; ok=0
     fi
   done
   for f in $BOOT_FILES; do
     if [ -f "$SNAPDIR/bootstrap/$f" ]; then
       cp -a "$SNAPDIR/bootstrap/$f" "$DST/bootstrap/$f" && [ -f "$DST/bootstrap/$f" ] || { log "ROLLBACK FAIL: restore bootstrap/$f"; ok=0; }
+    else
+      log "ROLLBACK FAIL: snapshot missing bootstrap/$f"; ok=0
     fi
   done
   for f in $TOP_FILES; do
-    if [ -f "$SNAPDIR/$f" ]; then cp -a "$SNAPDIR/$f" "$DST/$f" && [ -f "$DST/$f" ] || { log "ROLLBACK FAIL: restore $f"; ok=0; }
+    if [ -f "$SNAPDIR/$f" ]; then
+      cp -a "$SNAPDIR/$f" "$DST/$f" && [ -f "$DST/$f" ] || { log "ROLLBACK FAIL: restore $f"; ok=0; }
+    else
+      log "ROLLBACK FAIL: snapshot missing $f"; ok=0
     fi
   done
   # React: stage then swap, never delete live first
