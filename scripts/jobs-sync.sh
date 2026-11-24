@@ -176,9 +176,11 @@ rollback(){
   fi
   (cd "$DST" && "$PHP" "$COMPOSER" install --no-dev --prefer-dist --optimize-autoloader --no-interaction) >> "$LOG" 2>&1 \
     || { log "ROLLBACK FAIL: composer install"; ok=0; }
-  CACHE_CMD="config:cache route:cache"
-  [ -d "$DST/resources/views" ] && CACHE_CMD="$CACHE_CMD view:cache"
-  (cd "$DST" && "$PHP" artisan $CACHE_CMD) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: cache rebuild"; ok=0; }
+  (cd "$DST" && "$PHP" artisan config:cache) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: config:cache"; ok=0; }
+  (cd "$DST" && "$PHP" artisan route:cache) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: route:cache"; ok=0; }
+  if [ -d "$DST/resources/views" ]; then
+    (cd "$DST" && "$PHP" artisan view:cache) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: view:cache"; ok=0; }
+  fi
   (cd "$DST" && "$PHP" artisan --version) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: artisan boot"; ok=0; }
   UP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 https://jobs.sunrisepaint.in/up)
   [ "$UP" = "200" ] || { log "ROLLBACK FAIL: live /up=$UP"; ok=0; }
@@ -224,9 +226,11 @@ if ! cmp -s "$SRC/backend/composer.lock" "$SNAPDIR/composer.lock" 2>/dev/null; t
 fi
 
 # ---- caches: view:cache only if resources/views exists ----
-CACHE_CMD="config:cache route:cache"
-[ -d "$DST/resources/views" ] && CACHE_CMD="$CACHE_CMD view:cache"
-(cd "$DST" && "$PHP" artisan $CACHE_CMD) >> "$LOG" 2>&1 || fail "cache rebuild"
+(cd "$DST" && "$PHP" artisan config:cache) >> "$LOG" 2>&1 || fail "config:cache"
+(cd "$DST" && "$PHP" artisan route:cache) >> "$LOG" 2>&1 || fail "route:cache"
+if [ -d "$DST/resources/views" ]; then
+  (cd "$DST" && "$PHP" artisan view:cache) >> "$LOG" 2>&1 || fail "view:cache"
+fi
 
 # ---- verify boot + live /up ----
 (cd "$DST" && "$PHP" artisan --version) >> "$LOG" 2>&1 || fail "artisan boot"
