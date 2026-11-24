@@ -78,6 +78,16 @@ class AuthTest extends TestCase
         $response->assertStatus(401);
     }
 
+    public function test_unauthenticated_api_request_without_json_accept_returns_401()
+    {
+        // Browser-style request (Accept: text/html) must NOT redirect to a
+        // named 'login' route — that caused "Route [login] not defined" 500s.
+        $response = $this->get('/api/user');
+
+        $response->assertStatus(401)
+            ->assertJson(['message' => 'Unauthenticated.']);
+    }
+
     public function test_authenticated_user_can_access_protected_route()
     {
         $user = User::factory()->create();
