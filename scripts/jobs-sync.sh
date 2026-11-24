@@ -115,15 +115,25 @@ rollback(){
       log "ROLLBACK FAIL: snapshot missing $f"; ok=0
     fi
   done
-  # React: stage then swap, never delete live first
+  # React: stage to temp, verify, rename-swap; .old kept until verified, preserved on failure
   rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
   if [ -d "$SNAPDIR/public-app" ]; then
     cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" && [ -f "$DST/public/app.rbtmp/index.html" ] \
-      && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app" && rm -rf "$DST/public/app.old"; } \
+      && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app"; } \
       || { log "ROLLBACK FAIL: stage runtime app"; ok=0; }
+    [ -f "$DST/public/app/index.html" ] || { log "ROLLBACK FAIL: restored runtime app missing index.html"; ok=0; }
     cp -a "$SNAPDIR/public-app" "$LIVE_TMP" && [ -f "$LIVE_TMP/index.html" ] \
-      && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP" && rm -rf "$LIVE_APP.old"; } \
+      && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP"; } \
       || { log "ROLLBACK FAIL: stage live app"; ok=0; }
+    [ -f "$LIVE_APP/index.html" ] || { log "ROLLBACK FAIL: restored live app missing index.html"; ok=0; }
+    # delete .old backups ONLY if both restores verified
+    if [ -f "$DST/public/app/index.html" ] && [ -f "$LIVE_APP/index.html" ]; then
+      rm -rf "$LIVE_APP.old" "$DST/public/app.old"
+    else
+      log "ROLLBACK: preserving .old backups for manual recovery ($LIVE_APP.old, $DST/public/app.old)"
+    fi
+  else
+    log "ROLLBACK FAIL: snapshot public-app missing"; ok=0
   fi
   (cd "$DST" && "$PHP" "$COMPOSER" install --no-dev --prefer-dist --optimize-autoloader --no-interaction) >> "$LOG" 2>&1 \
     || { log "ROLLBACK FAIL: composer install"; ok=0; }
@@ -133,7 +143,7 @@ rollback(){
   (cd "$DST" && "$PHP" artisan --version) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: artisan boot"; ok=0; }
   UP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 https://jobs.sunrisepaint.in/up)
   [ "$UP" = "200" ] || { log "ROLLBACK FAIL: live /up=$UP"; ok=0; }
-  rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp" "$LIVE_APP.old" "$DST/public/app.old"
+  rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp"
   if [ "$ok" = "1" ]; then log "ROLLBACK done $OLD_SHA (live /up=200)"; else log "ROLLBACK FAILED $OLD_SHA"; fi
   [ "$ok" = "1" ]
 }

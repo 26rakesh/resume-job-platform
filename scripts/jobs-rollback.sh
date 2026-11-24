@@ -54,12 +54,20 @@ rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
 if [ -d "$SNAPDIR/public-app" ]; then
   cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" \
     && [ -f "$DST/public/app.rbtmp/index.html" ] \
-    && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app" && rm -rf "$DST/public/app.old"; } \
+    && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app"; } \
     || { log "ROLLBACK FAIL: stage runtime app"; ok=0; }
+  [ -f "$DST/public/app/index.html" ] || { log "ROLLBACK FAIL: restored runtime app missing index.html"; ok=0; }
   cp -a "$SNAPDIR/public-app" "$LIVE_TMP" \
     && [ -f "$LIVE_TMP/index.html" ] \
-    && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP" && rm -rf "$LIVE_APP.old"; } \
+    && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP"; } \
     || { log "ROLLBACK FAIL: stage live app"; ok=0; }
+  [ -f "$LIVE_APP/index.html" ] || { log "ROLLBACK FAIL: restored live app missing index.html"; ok=0; }
+  # delete .old backups only when both restores verified; preserve for manual recovery otherwise
+  if [ -f "$DST/public/app/index.html" ] && [ -f "$LIVE_APP/index.html" ]; then
+    rm -rf "$LIVE_APP.old" "$DST/public/app.old"
+  else
+    log "ROLLBACK: preserving .old backups for manual recovery"
+  fi
 fi
 
 # ---- writable dirs only — never storage/app/private ----
@@ -78,7 +86,7 @@ CACHE_CMD="config:cache route:cache"
 UP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 https://jobs.sunrisepaint.in/up)
 [ "$UP" = "200" ] || { log "ROLLBACK FAIL: live /up=$UP"; ok=0; }
 
-rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp" "$LIVE_APP.old" "$DST/public/app.old"
+rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp"
 if [ "$ok" = "1" ]; then
   echo "$SHA" > "$STATE"
   log "ROLLBACK done $SHA (live /up=200)"
