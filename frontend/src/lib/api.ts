@@ -31,9 +31,10 @@ export const initCsrf = async () => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      window.location.href = '/login'
-    }
+    // Do NOT redirect on 401 here — AuthContext handles unauthenticated
+    // state and ProtectedRoute performs client-side navigation.
+    // A global window.location redirect causes a reload loop on startup
+    // when /api/user returns 401 for anonymous visitors.
     if (error.response?.status === 419) {
       // CSRF token mismatch - reinitialize
       initCsrf()
