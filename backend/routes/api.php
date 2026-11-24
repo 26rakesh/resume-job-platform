@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ResumeController;
 use App\Http\Controllers\Api\UserController;
 
 /*
@@ -32,4 +33,7 @@ if (config('app.env') !== 'production') {
 Route::middleware('auth')->group(function () {
     Route::get('/user', [UserController::class, 'show']);
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/resumes', [ResumeController::class, 'index']);
+    Route::post('/resumes', [ResumeController::class, 'store']);
+    Route::get('/resumes/{resume}/download', [ResumeController::class, 'download']);
 });
