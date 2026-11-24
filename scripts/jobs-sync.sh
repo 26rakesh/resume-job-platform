@@ -33,6 +33,22 @@ TOP_FILES="artisan composer.json composer.lock phpunit.xml"
 log(){ echo "$(date -u +%FT%TZ) $*" >> "$LOG"; }
 die(){ log "FAIL: $*"; exit 1; }
 
+# Guarded rename-swap: $1=target dir, $2=staged dir (must contain index.html).
+# - aborts if a stale .old exists (manual inspection required)
+# - checks every mv; keeps .old unless replacement verified; deletes .old only on success
+swap_dir(){
+  local tgt="$1" staged="$2"
+  if [ -e "$tgt.old" ]; then log "FAIL: stale $tgt.old exists — manual inspection required at $tgt.old"; return 1; fi
+  if [ -d "$tgt" ]; then
+    mv "$tgt" "$tgt.old" || { log "FAIL: mv $tgt -> $tgt.old failed"; return 1; }
+    [ -d "$tgt.old" ] || { log "FAIL: $tgt.old missing after mv"; return 1; }
+  fi
+  mv "$staged" "$tgt" || { log "FAIL: mv $staged -> $tgt failed"; return 1; }
+  [ -f "$tgt/index.html" ] || { log "FAIL: $tgt/index.html missing after swap"; return 1; }
+  rm -rf "$tgt.old"
+  return 0
+}
+
 # ---- pre-flight: lock, sources, PHP ----
 exec 9>"$LOCK" || die "cannot open lock"
 flock -n 9 || exit 0
@@ -115,23 +131,21 @@ rollback(){
       log "ROLLBACK FAIL: snapshot missing $f"; ok=0
     fi
   done
-  # React: stage to temp, verify, rename-swap; .old kept until verified, preserved on failure
+  # React: stage to temp, verify, guarded rename-swap per dir; .old kept on any failure
   rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
   if [ -d "$SNAPDIR/public-app" ]; then
-    cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" && [ -f "$DST/public/app.rbtmp/index.html" ] \
-      && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app"; } \
-      || { log "ROLLBACK FAIL: stage runtime app"; ok=0; }
-    [ -f "$DST/public/app/index.html" ] || { log "ROLLBACK FAIL: restored runtime app missing index.html"; ok=0; }
-    cp -a "$SNAPDIR/public-app" "$LIVE_TMP" && [ -f "$LIVE_TMP/index.html" ] \
-      && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP"; } \
-      || { log "ROLLBACK FAIL: stage live app"; ok=0; }
-    [ -f "$LIVE_APP/index.html" ] || { log "ROLLBACK FAIL: restored live app missing index.html"; ok=0; }
-    # delete .old backups ONLY if both restores verified
-    if [ -f "$DST/public/app/index.html" ] && [ -f "$LIVE_APP/index.html" ]; then
-      rm -rf "$LIVE_APP.old" "$DST/public/app.old"
+    if cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" && [ -f "$DST/public/app.rbtmp/index.html" ]; then
+      swap_dir "$DST/public/app" "$DST/public/app.rbtmp" || { log "ROLLBACK FAIL: restore runtime app"; ok=0; }
     else
-      log "ROLLBACK: preserving .old backups for manual recovery ($LIVE_APP.old, $DST/public/app.old)"
+      log "ROLLBACK FAIL: stage runtime app"; ok=0
     fi
+    if cp -a "$SNAPDIR/public-app" "$LIVE_TMP" && [ -f "$LIVE_TMP/index.html" ]; then
+      swap_dir "$LIVE_APP" "$LIVE_TMP" || { log "ROLLBACK FAIL: restore live app"; ok=0; }
+    else
+      log "ROLLBACK FAIL: stage live app"; ok=0
+    fi
+    [ -f "$DST/public/app/index.html" ] || { log "ROLLBACK FAIL: restored runtime app missing index.html"; ok=0; }
+    [ -f "$LIVE_APP/index.html" ] || { log "ROLLBACK FAIL: restored live app missing index.html"; ok=0; }
   else
     log "ROLLBACK FAIL: snapshot public-app missing"; ok=0
   fi
@@ -155,10 +169,8 @@ cp -a "$SRC/backend/public/app" "$DST/public/app.new" || fail "stage runtime app
 [ -f "$DST/public/app.new/index.html" ] || fail "staged index.html missing"
 cp -a "$DST/public/app.new" "$LIVE_TMP" || fail "stage live app"
 [ -f "$LIVE_TMP/index.html" ] || fail "staged live index.html missing"
-rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null
-mv "$DST/public/app.new" "$DST/public/app" && rm -rf "$DST/public/app.old" || fail "swap runtime app"
-rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null
-mv "$LIVE_TMP" "$LIVE_APP" && rm -rf "$LIVE_APP.old" || fail "swap live app"
+swap_dir "$DST/public/app" "$DST/public/app.new" || fail "swap runtime app"
+swap_dir "$LIVE_APP" "$LIVE_TMP" || fail "swap live app"
 
 # ---- sync code dirs (never bootstrap/cache, never storage) ----
 for d in app config database routes tests; do

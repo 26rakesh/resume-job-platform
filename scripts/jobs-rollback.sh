@@ -21,6 +21,22 @@ log(){ echo "$(date -u +%FT%TZ) ROLLBACK $SHA: $*" >> "$LOG"; }
 ok=1
 chk(){ [ "$1" = "0" ] && { log "ROLLBACK FAIL: $2"; ok=0; } || true; }
 
+# Guarded rename-swap: $1=target dir, $2=staged dir (must contain index.html).
+# - aborts if a stale .old exists (manual inspection required)
+# - checks every mv; keeps .old unless replacement verified; deletes .old only on success
+swap_dir(){
+  local tgt="$1" staged="$2"
+  if [ -e "$tgt.old" ]; then log "FAIL: stale $tgt.old exists — manual inspection required at $tgt.old"; return 1; fi
+  if [ -d "$tgt" ]; then
+    mv "$tgt" "$tgt.old" || { log "FAIL: mv $tgt -> $tgt.old failed"; return 1; }
+    [ -d "$tgt.old" ] || { log "FAIL: $tgt.old missing after mv"; return 1; }
+  fi
+  mv "$staged" "$tgt" || { log "FAIL: mv $staged -> $tgt failed"; return 1; }
+  [ -f "$tgt/index.html" ] || { log "FAIL: $tgt/index.html missing after swap"; return 1; }
+  rm -rf "$tgt.old"
+  return 0
+}
+
 # ---- validate snapshot completeness BEFORE replacing anything ----
 for d in app config database routes tests public; do
   [ -d "$SNAPDIR/$d" ] || { log "FAIL: snapshot incomplete (missing $d)"; exit 1; }
@@ -52,22 +68,20 @@ done
 # ---- React assets: staged copy, then rename-swap (brief window, old kept until new verified) ----
 rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
 if [ -d "$SNAPDIR/public-app" ]; then
-  cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" \
-    && [ -f "$DST/public/app.rbtmp/index.html" ] \
-    && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app"; } \
-    || { log "ROLLBACK FAIL: stage runtime app"; ok=0; }
-  [ -f "$DST/public/app/index.html" ] || { log "ROLLBACK FAIL: restored runtime app missing index.html"; ok=0; }
-  cp -a "$SNAPDIR/public-app" "$LIVE_TMP" \
-    && [ -f "$LIVE_TMP/index.html" ] \
-    && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP"; } \
-    || { log "ROLLBACK FAIL: stage live app"; ok=0; }
-  [ -f "$LIVE_APP/index.html" ] || { log "ROLLBACK FAIL: restored live app missing index.html"; ok=0; }
-  # delete .old backups only when both restores verified; preserve for manual recovery otherwise
-  if [ -f "$DST/public/app/index.html" ] && [ -f "$LIVE_APP/index.html" ]; then
-    rm -rf "$LIVE_APP.old" "$DST/public/app.old"
+  if cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" && [ -f "$DST/public/app.rbtmp/index.html" ]; then
+    swap_dir "$DST/public/app" "$DST/public/app.rbtmp" || { log "ROLLBACK FAIL: restore runtime app"; ok=0; }
   else
-    log "ROLLBACK: preserving .old backups for manual recovery"
+    log "ROLLBACK FAIL: stage runtime app"; ok=0
   fi
+  if cp -a "$SNAPDIR/public-app" "$LIVE_TMP" && [ -f "$LIVE_TMP/index.html" ]; then
+    swap_dir "$LIVE_APP" "$LIVE_TMP" || { log "ROLLBACK FAIL: restore live app"; ok=0; }
+  else
+    log "ROLLBACK FAIL: stage live app"; ok=0
+  fi
+  [ -f "$DST/public/app/index.html" ] || { log "ROLLBACK FAIL: restored runtime app missing index.html"; ok=0; }
+  [ -f "$LIVE_APP/index.html" ] || { log "ROLLBACK FAIL: restored live app missing index.html"; ok=0; }
+else
+  log "ROLLBACK FAIL: snapshot public-app missing"; ok=0
 fi
 
 # ---- writable dirs only — never storage/app/private ----
