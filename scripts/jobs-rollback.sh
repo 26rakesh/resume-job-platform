@@ -47,6 +47,8 @@ done
 for f in artisan composer.json composer.lock phpunit.xml; do
   [ -f "$SNAPDIR/$f" ] || { log "FAIL: snapshot missing $f"; exit 1; }
 done
+[ -d "$SNAPDIR/public-app" ] && [ -f "$SNAPDIR/public-app/index.html" ] \
+  || { log "FAIL: snapshot React build missing public-app/index.html"; exit 1; }
 log "ROLLBACK start — snapshot validated"
 
 # ---- restore code dirs; preserve bootstrap/cache (sync only app.php+providers.php) ----
