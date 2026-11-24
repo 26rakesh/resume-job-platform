@@ -22,11 +22,12 @@ ok=1
 chk(){ [ "$1" = "0" ] && { log "ROLLBACK FAIL: $2"; ok=0; } || true; }
 
 # ---- validate snapshot completeness BEFORE replacing anything ----
-for d in app config database routes public; do
+for d in app config database routes tests public; do
   [ -d "$SNAPDIR/$d" ] || { log "FAIL: snapshot incomplete (missing $d)"; exit 1; }
 done
-[ -f "$SNAPDIR/composer.json" ] && [ -f "$SNAPDIR/composer.lock" ] || { log "FAIL: snapshot missing composer files"; exit 1; }
-[ -d "$SNAPDIR/public-app" ] && [ -f "$SNAPDIR/public-app/index.html" ] || { log "FAIL: snapshot React build missing index.html"; exit 1; }
+for f in app.php providers.php; do
+  [ -f "$SNAPDIR/bootstrap/$f" ] || { log "FAIL: snapshot missing bootstrap/$f"; exit 1; }
+done
 for f in artisan composer.json composer.lock phpunit.xml; do
   [ -f "$SNAPDIR/$f" ] || { log "FAIL: snapshot missing $f"; exit 1; }
 done
@@ -48,16 +49,16 @@ for f in artisan composer.json composer.lock phpunit.xml; do
   [ -f "$SNAPDIR/$f" ] && cp -a "$SNAPDIR/$f" "$DST/$f" || { log "ROLLBACK FAIL: restore $f"; ok=0; }
 done
 
-# ---- React assets: staged swap — never delete live first ----
+# ---- React assets: staged copy, then rename-swap (brief window, old kept until new verified) ----
 rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
 if [ -d "$SNAPDIR/public-app" ]; then
   cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" \
     && [ -f "$DST/public/app.rbtmp/index.html" ] \
-    && { rm -rf "$DST/public/app"; mv "$DST/public/app.rbtmp" "$DST/public/app"; } \
+    && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app" && rm -rf "$DST/public/app.old"; } \
     || { log "ROLLBACK FAIL: stage runtime app"; ok=0; }
   cp -a "$SNAPDIR/public-app" "$LIVE_TMP" \
     && [ -f "$LIVE_TMP/index.html" ] \
-    && { rm -rf "$LIVE_APP"; mv "$LIVE_TMP" "$LIVE_APP"; } \
+    && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP" && rm -rf "$LIVE_APP.old"; } \
     || { log "ROLLBACK FAIL: stage live app"; ok=0; }
 fi
 
@@ -77,7 +78,7 @@ CACHE_CMD="config:cache route:cache"
 UP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 https://jobs.sunrisepaint.in/up)
 [ "$UP" = "200" ] || { log "ROLLBACK FAIL: live /up=$UP"; ok=0; }
 
-rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp"
+rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp" "$LIVE_APP.old" "$DST/public/app.old"
 if [ "$ok" = "1" ]; then
   echo "$SHA" > "$STATE"
   log "ROLLBACK done $SHA (live /up=200)"

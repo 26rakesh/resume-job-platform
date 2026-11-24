@@ -10,7 +10,8 @@
 #  - NEVER chmod -R on storage (private resumes keep their permissions)
 #  - bootstrap/cache preserved: only bootstrap/app.php + providers.php synced
 #  - snapshot fully validated BEFORE runtime is modified
-#  - React assets staged to temp, verified, swapped atomically in BOTH locations
+#  - React assets staged to temp, verified, then rename-swapped in BOTH locations
+#    (old dir moved aside first; brief window documented — not a true atomic swap)
 #  - view:cache skipped when resources/views is absent
 #  - any failure after sync start -> full rollback; non-zero exit
 set -u
@@ -118,10 +119,10 @@ rollback(){
   rm -rf "$DST/public/app.rbtmp" "$LIVE_TMP"
   if [ -d "$SNAPDIR/public-app" ]; then
     cp -a "$SNAPDIR/public-app" "$DST/public/app.rbtmp" && [ -f "$DST/public/app.rbtmp/index.html" ] \
-      && { rm -rf "$DST/public/app"; mv "$DST/public/app.rbtmp" "$DST/public/app"; } \
+      && { rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null; mv "$DST/public/app.rbtmp" "$DST/public/app" && rm -rf "$DST/public/app.old"; } \
       || { log "ROLLBACK FAIL: stage runtime app"; ok=0; }
     cp -a "$SNAPDIR/public-app" "$LIVE_TMP" && [ -f "$LIVE_TMP/index.html" ] \
-      && { rm -rf "$LIVE_APP"; mv "$LIVE_TMP" "$LIVE_APP"; } \
+      && { rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null; mv "$LIVE_TMP" "$LIVE_APP" && rm -rf "$LIVE_APP.old"; } \
       || { log "ROLLBACK FAIL: stage live app"; ok=0; }
   fi
   (cd "$DST" && "$PHP" "$COMPOSER" install --no-dev --prefer-dist --optimize-autoloader --no-interaction) >> "$LOG" 2>&1 \
@@ -132,7 +133,7 @@ rollback(){
   (cd "$DST" && "$PHP" artisan --version) >> "$LOG" 2>&1 || { log "ROLLBACK FAIL: artisan boot"; ok=0; }
   UP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 https://jobs.sunrisepaint.in/up)
   [ "$UP" = "200" ] || { log "ROLLBACK FAIL: live /up=$UP"; ok=0; }
-  rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp"
+  rm -rf "$LIVE_TMP" "$DST/public/app.rbtmp" "$LIVE_APP.old" "$DST/public/app.old"
   if [ "$ok" = "1" ]; then log "ROLLBACK done $OLD_SHA (live /up=200)"; else log "ROLLBACK FAILED $OLD_SHA"; fi
   [ "$ok" = "1" ]
 }
@@ -144,8 +145,10 @@ cp -a "$SRC/backend/public/app" "$DST/public/app.new" || fail "stage runtime app
 [ -f "$DST/public/app.new/index.html" ] || fail "staged index.html missing"
 cp -a "$DST/public/app.new" "$LIVE_TMP" || fail "stage live app"
 [ -f "$LIVE_TMP/index.html" ] || fail "staged live index.html missing"
-rm -rf "$DST/public/app"; mv "$DST/public/app.new" "$DST/public/app" || fail "swap runtime app"
-rm -rf "$LIVE_APP"; mv "$LIVE_TMP" "$LIVE_APP" || fail "swap live app"
+rm -rf "$DST/public/app.old"; mv "$DST/public/app" "$DST/public/app.old" 2>/dev/null
+mv "$DST/public/app.new" "$DST/public/app" && rm -rf "$DST/public/app.old" || fail "swap runtime app"
+rm -rf "$LIVE_APP.old"; mv "$LIVE_APP" "$LIVE_APP.old" 2>/dev/null
+mv "$LIVE_TMP" "$LIVE_APP" && rm -rf "$LIVE_APP.old" || fail "swap live app"
 
 # ---- sync code dirs (never bootstrap/cache, never storage) ----
 for d in app config database routes tests; do
